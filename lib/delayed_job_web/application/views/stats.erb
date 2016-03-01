@@ -32,5 +32,27 @@
       <%= delayed_jobs(:working, @queues).count %>
     </th>
   </tr>
+  <tr>
+    <th class="status">
+      oldest pending
+    </th>
+    <th class="relatized_time">
+      <% oldest_pending_job = delayed_jobs(:pending, @queues).order(:created_at).first %>
+      <dd class="time">
+        <%= oldest_pending_job ? (h oldest_pending_job.created_at.rfc822) : 'none' %>
+      </dd>
+    </th>
+  </tr>
+  <tr>
+    <th class="status">
+      oldest running
+    </th>
+    <th class="relatized_time">
+      <% oldest_running_job = delayed_jobs(:working, @queues).order(:created_at).first %>
+      <dd class="time">
+        <%= oldest_running_job ? (h oldest_running_job.created_at.rfc822) : 'none' %>
+      </dd>
+    </th>
+  </tr>
 </table>
 <%= poll %>

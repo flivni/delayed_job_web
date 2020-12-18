@@ -9,6 +9,8 @@ class DelayedJobWeb < Sinatra::Base
   set :public_folder, File.expand_path('../public', __FILE__)
   set :views, File.expand_path('../views', __FILE__)
 
+  set :allow_requeue_pending, true
+
   # Enable sessions so we can use CSRF protection
   enable :sessions
 
@@ -38,16 +40,30 @@ class DelayedJobWeb < Sinatra::Base
   end
 
   def per_page
-    20
+    params[:per_page].to_i > 0 ? params[:per_page].to_i : 20
   end
 
   def url_path(*path_parts)
     url = [ path_prefix, path_parts ].join("/").squeeze('/')
-    url += "?queues=#{@queues.join(",")}" unless @queues.empty?
+    url += "?queues=#{CGI.escape(@queues.join(","))}" unless @queues.empty?
     url
   end
 
   alias_method :u, :url_path
+
+  def queue_path(queue)
+    with_queue(queue) do
+      url_path(:overview)
+    end
+  end
+
+  def with_queue(queue, &block)
+    aux_queues = @queues
+    @queues = Array(queue)
+    result  = block.call
+    @queues = aux_queues
+    result
+  end
 
   def h(text)
     Rack::Utils.escape_html(text)
@@ -106,6 +122,7 @@ class DelayedJobWeb < Sinatra::Base
     get "/#{page}" do
       @jobs     = delayed_jobs(page.to_sym, @queues).order('created_at desc, id desc').offset(start).limit(per_page)
       @all_jobs = delayed_jobs(page.to_sym, @queues)
+      @allow_requeue_pending = settings.allow_requeue_pending
       erb page.to_sym
     end
   end
@@ -115,11 +132,16 @@ class DelayedJobWeb < Sinatra::Base
     redirect back
   end
 
-  %w(pending failed).each do |page|
-    post "/requeue/#{page}" do
-      delayed_jobs(page.to_sym, @queues).update_all(:run_at => Time.now, :failed_at => nil)
-      redirect back
+  post "/requeue/pending" do
+    if settings.allow_requeue_pending
+      delayed_jobs(:pending, @queues).update_all(:run_at => Time.now, :failed_at => nil)
     end
+    redirect back
+  end
+
+  post "/requeue/failed" do
+    delayed_jobs(:failed, @queues).update_all(:run_at => Time.now, :failed_at => nil)
+    redirect back
   end
 
   post "/requeue/:id" do
@@ -145,7 +167,7 @@ class DelayedJobWeb < Sinatra::Base
     rel =
       case type
       when :working
-        rel.where('locked_at IS NOT NULL')
+        rel.where('locked_at IS NOT NULL AND failed_at IS NULL')
       when :failed
         rel.where('last_error IS NOT NULL')
       when :pending
